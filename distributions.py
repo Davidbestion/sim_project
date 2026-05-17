@@ -188,39 +188,41 @@ def time_to_pregnancy(age: float) -> float:
 # Número de hijos deseados
 # ---------------------------------------------------------------------------
 
-# Las probabilidades del enunciado no suman 1 (son condicionales / solapadas).
-# Se re-normalizan para construir una CDF válida.
-_RAW_CHILDREN_PROBS = [
-    (1, 0.60),
-    (2, 0.75),
-    (3, 0.35),
-    (4, 0.20),
-    (5, 0.10),
-    (6, 0.05),
-]
-_CHILDREN_TOTAL = sum(p for _, p in _RAW_CHILDREN_PROBS)
-_CHILDREN_CDF: list[tuple[float, int]] = []
-cumulative = 0.0
-for _n, _p in _RAW_CHILDREN_PROBS:
-    cumulative += _p / _CHILDREN_TOTAL
-    _CHILDREN_CDF.append((cumulative, _n))
+# Cada fila de la tabla es un ensayo de Bernoulli independiente:
+# la probabilidad representa si la persona desea ese hijo adicional.
+# El número total deseado es la suma de todos los éxitos.
+# Valor esperado: 0.60 + 0.75 + 0.35 + 0.20 + 0.10 + 0.05 = 2.05 hijos.
+_CHILDREN_BERNOULLIS = [0.60, 0.75, 0.35, 0.20, 0.10, 0.05]
 
 
 def desired_children() -> int:
     """Muestrea el número de hijos que una persona desea tener.
 
-    Usa el método de la transformada inversa sobre la CDF normalizada de la
-    tabla del enunciado.
+    Cada entrada de la tabla del enunciado es un ensayo de Bernoulli
+    independiente: la probabilidad de la fila N indica si la persona
+    desearía tener N hijos. Se corren los 6 Bernoullis de forma
+    independiente y el resultado es el MAYOR número cuyo Bernoulli
+    resultó exitoso.
+
+    Ejemplo:
+        B(1)=0.60 → éxito  ✓
+        B(2)=0.75 → éxito  ✓
+        B(3)=0.35 → fallo  ✗
+        B(4)=0.20 → éxito  ✓  ← máximo éxito
+        B(5)=0.10 → fallo  ✗
+        B(6)=0.05 → fallo  ✗
+        → desea 4 hijos
+
+    Si ningún Bernoulli resulta éxito (todos fallan), la persona no
+    desea tener hijos (retorna 0).
 
     Returns:
-        Número entero de hijos deseados (entre 1 y 6, donde 6 representa
+        Número entero de hijos deseados (entre 0 y 6, donde 6 representa
         "más de 5").
     """
-    u = random.random()
-    for cdf_val, n in _CHILDREN_CDF:
-        if u <= cdf_val:
-            return n
-    return 6  # fallback
+    # Enumerar desde 1: el índice i+1 corresponde al número de hijos
+    successes = [i + 1 for i, p in enumerate(_CHILDREN_BERNOULLIS) if bernoulli(p)]
+    return max(successes) if successes else 0
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +238,27 @@ _PARTNER_WISH_TABLE = [
     (45,  60, 0.50),
     (60, 125, 0.20),
 ]
+
+# Umbrales de edad donde cambia el tramo. Se derivan automáticamente de
+# _PARTNER_WISH_TABLE para que ambos estén siempre sincronizados.
+PARTNER_WISH_THRESHOLDS: list[int] = [row[0] for row in _PARTNER_WISH_TABLE]
+
+# Tiempo medio (años) entre encuentros de un soltero con un posible candidato/a.
+# Parámetro de la Exponencial usada en el evento SEEK_PARTNER de cada persona.
+# Cambiar este valor para calibrar la frecuencia de búsqueda de pareja.
+MEAN_SEEK_INTERVAL: float = 0.50   # ≈ 3 meses de media entre encuentros
+
+
+def time_to_seek_partner() -> float:
+    """Tiempo hasta el próximo encuentro con un posible candidato/a.
+
+    Modela el tiempo que tarda un soltero en toparse con alguien del sexo
+    opuesto con quien intentar formar pareja. Distribuido Exp(MEAN_SEEK_INTERVAL).
+
+    Returns:
+        Tiempo en años (float positivo).
+    """
+    return exponential(MEAN_SEEK_INTERVAL)
 
 
 def wants_partner_probability(age: float) -> float:
@@ -394,37 +417,38 @@ def sample_alone_period(age: float) -> float:
 # Embarazo múltiple
 # ---------------------------------------------------------------------------
 
-# Tabla: (num_bebes, probabilidad)
-_MULTIPLE_BIRTH_PROBS = [
-    (1, 0.70),
-    (2, 0.18),
-    (3, 0.08),
-    (4, 0.04),
-    (5, 0.02),
-]
-# Construir CDF
-_BIRTH_CDF: list[tuple[float, int]] = []
-_cumulative_birth = 0.0
-for _nb, _pb in _MULTIPLE_BIRTH_PROBS:
-    _cumulative_birth += _pb
-    _BIRTH_CDF.append((_cumulative_birth, _nb))
+# Cada fila de la tabla es un ensayo de Bernoulli independiente:
+# la probabilidad indica si ese bebé adicional nace en el parto.
+# El total de bebés = suma de éxitos, con mínimo 1 (es un parto real).
+# Valor esperado: 0.70 + 0.18 + 0.08 + 0.04 + 0.02 = 1.02 bebés.
+_BIRTH_BERNOULLIS = [0.70, 0.18, 0.08, 0.04, 0.02]
 
 
 def sample_num_babies() -> int:
-    """Muestrea el número de bebés en un embarazo (embarazo múltiple).
+    """Muestrea el número de bebés nacidos en un parto.
 
-    Usa el método de la transformada inversa sobre la CDF de la tabla del
-    enunciado. Las probabilidades suman 1.02 por redondeo; se usa la CDF
-    acumulada directamente aceptando el último bin.
+    Cada entrada de la tabla del enunciado es un ensayo de Bernoulli
+    independiente: la probabilidad de la fila N indica si nacen N bebés.
+    Se corren los 5 Bernoullis de forma independiente y el resultado es
+    el MAYOR número cuyo Bernoulli resultó éxito (Opción A: máximo éxito).
+
+    Ejemplo:
+        B(1)=0.70 → éxito  ✓
+        B(2)=0.18 → fallo  ✗
+        B(3)=0.08 → éxito  ✓  ← máximo éxito
+        B(4)=0.04 → fallo  ✗
+        B(5)=0.02 → fallo  ✗
+        → nacen 3 bebés
+
+    Si todas las Bernoullis fallan (todos los ensayos fallan), se considera 
+    un embarazo sin nacidos vivos y se retorna 0.
 
     Returns:
-        Número entero de bebés nacidos (1 a 5).
+        Número entero de bebés nacidos (entre 0 y 5).
     """
-    u = random.random()
-    for cdf_val, n in _BIRTH_CDF:
-        if u <= cdf_val:
-            return n
-    return 5  # fallback (probabilidades casi suman 1)
+    # Enumerar desde 1: el índice i+1 corresponde al número de bebés
+    successes = [i + 1 for i, p in enumerate(_BIRTH_BERNOULLIS) if bernoulli(p)]
+    return max(successes) if successes else 0  # 0 = embarazo sin nacidos vivos
 
 
 def sample_baby_sex() -> bool:

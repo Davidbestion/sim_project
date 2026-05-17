@@ -15,7 +15,11 @@ import itertools
 from enum import Enum, auto
 from typing import Optional
 
-from distributions import desired_children
+from distributions import desired_children, wants_partner_probability, bernoulli, PARTNER_WISH_THRESHOLDS
+
+
+# Los umbrales de edad donde se re-sortea el deseo de pareja se importan
+# directamente de la tabla en distributions.py (PARTNER_WISH_THRESHOLDS).
 
 
 # Generador de IDs únicos para cada persona
@@ -69,12 +73,23 @@ class Person:
 
         # Estado sentimental
         self.status: RelationshipStatus = RelationshipStatus.SINGLE
-        self.partner_desire: bool = False  # True si la persona desea tener pareja, False si no
         self.partner: Optional[Person] = None
         # Tiempo absoluto de simulación en que la pareja actual se romperá.
-        # Se fija al momento de formarse la pareja y se usa para decidir si
-        # los eventos de embarazo se agendan o no. inf = sin ruptura prevista.
-        # self.couple_breakup_time: float = float("inf")
+        # Se fija al formarse la pareja; inf = sin ruptura prevista.
+        self.couple_breakup_time: float = float("inf")
+        # Deseo intrínseco de tener pareja. False por defecto; se sortea
+        # mediante update_partner_desire() al cruzar cada umbral de tramo.
+        # Para la población inicial adulta se llama desde _initialize_population().
+        self.partner_desire: bool = False
+
+        # Tiempo de simulación en que la persona entró a su período de soltería
+        # más reciente. Se usa para medir cuánto tiempo estuvo sola antes de
+        # formar pareja. Se actualiza en SOLO_END y cuando entra al pool a los 12.
+        self.solo_since: float = birth_time
+
+        # True mientras haya un evento SEEK_PARTNER pendiente en la cola.
+        # Evita programar eventos duplicados que distorsionarían la tasa de encuentros.
+        self.seek_in_progress: bool = False
 
         # Datos reproductivos
 
@@ -198,9 +213,28 @@ class Person:
             self.partner.partner = None
             self.partner = None
 
+    def update_partner_desire(self) -> None:
+        """Re-sortea el deseo de pareja según el tramo de edad actual.
+
+        Debe llamarse al cruzar un umbral de tramo (desde birthday()) o
+        una vez al inicializar personas adultas de la población inicial.
+        """
+        self.partner_desire = bernoulli(wants_partner_probability(self.age))
+
     def birthday(self) -> None:
-        """Incrementa la edad de la persona en un año."""
+        """Incrementa la edad de la persona en un año.
+
+        Si al cumplir años la persona cruza el umbral de un nuevo tramo de
+        edad (según _PARTNER_DESIRE_THRESHOLDS), se re-sortea su deseo de
+        tener pareja con la probabilidad del nuevo tramo.
+        """
+        old_age = self.age
         self.age += 1.0
+        # Detectar si se cruzó algún umbral de tramo
+        for threshold in PARTNER_WISH_THRESHOLDS:
+            if old_age < threshold <= self.age:
+                self.update_partner_desire()
+                break  # solo puede cruzarse un umbral por año
 
     def register_birth(self, num_babies: int) -> None:
         """Registra que la mujer ha dado a luz y actualiza el conteo de hijos.

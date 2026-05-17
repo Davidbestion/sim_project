@@ -65,7 +65,7 @@ Para que dos personas sean pareja deben estar solas en ese instante y deben dese
     | 45-60 | 0.5
     | 60-125 | 0.2
 
-Si dos personas de diferente sexo están solas y ambas desean querer tener parejas entonces la probabilidad de volverse pareja está relacionada con la diferencia de edad:
+Si dos personas de diferente sexo están solas y ambas desean tener pareja entonces la probabilidad de volverse pareja está relacionada con la diferencia de edad:
 
     | Diferencia de Edad | Probabilidad Establecer Pareja |
     |-------------------|-------------------------------|

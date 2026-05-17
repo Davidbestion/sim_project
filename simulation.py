@@ -21,7 +21,6 @@ from typing import List
 from distributions import (
     uniform,
     time_to_death,
-    wants_partner,
 )
 from events import Event, EventType, EVENT_HANDLERS
 from person import Person
@@ -144,8 +143,10 @@ class Simulation:
             age = uniform(0.0, 100.0)
             person = Person(is_male=True, age=age, birth_time=0.0)
             self.population.add(person)
-            # Personas mayores de 12 pueden buscar pareja → añadir a solteros
+            # Personas mayores de 12 pueden buscar pareja → inicializar deseo
+            # y añadir a solteros disponibles.
             if age >= 12.0:
+                person.update_partner_desire()
                 self.singles.add(person)
             # Registrar en estadísticas
             self.stats.record_person_added(0.0, person)
@@ -156,6 +157,7 @@ class Simulation:
             person = Person(is_male=False, age=age, birth_time=0.0)
             self.population.add(person)
             if age >= 12.0:
+                person.update_partner_desire()
                 self.singles.add(person)
             self.stats.record_person_added(0.0, person)
 
@@ -165,11 +167,11 @@ class Simulation:
         Para cada persona se programa:
           - Su muerte (basada en la probabilidad según edad y sexo).
           - Su próximo cumpleaños (en 1 año).
-          - Para mujeres en edad fértil con deseo de pareja: primer intento
-            de embarazo (se activará sólo si tiene pareja cuando ocurra).
-
-        También se programa el primer chequeo de formación de parejas.
+          - Para solteros adultos que desean pareja: primer evento SEEK_PARTNER
+            con tiempo sorteado de Exp(MEAN_SEEK_INTERVAL).
         """
+        from events import _schedule_seek_partner
+
         for person in self.population:
             # Evento de muerte
             dt_death = time_to_death(person.age, person.is_male)
@@ -185,14 +187,10 @@ class Simulation:
                 event_type=EventType.BIRTHDAY,
                 payload={"person": person}
             ))
-            # Los eventos de embarazo NO se agendan aquí: solo se agendan
-            # en el momento en que la mujer forma pareja (handle_partner_check
-            # y handle_birth), garantizando que siempre tiene pareja cuando
-            # el evento ocurre.
 
-        # Primer chequeo de formación de parejas (a los 6 meses)
-        self.schedule(Event(
-            time=0.5,
-            event_type=EventType.PARTNER_CHECK,
-            payload={}
-        ))
+        # Iniciar la cadena individual de búsqueda de pareja para cada soltero
+        # adulto que desea pareja. Para el resto la cadena arranca cuando
+        # crucen el umbral de edad correspondiente en handle_birthday.
+        for person in self.singles:
+            if person.partner_desire:
+                _schedule_seek_partner(self, 0.0, person)

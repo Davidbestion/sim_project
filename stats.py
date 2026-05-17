@@ -74,6 +74,10 @@ class SimulationStats:
         self.total_couples_formed: int = 0
         self.total_breakups: int = 0
 
+        # Duraciones de períodos de soltería que terminaron en pareja.
+        # Cada entrada es (t_pareja - t_inicio_soltería) de un individuo.
+        self._solo_durations: list[float] = []
+
         # Tamaño inicial de la población (se actualiza con record_person_added)
         self._current_pop: int = 0
 
@@ -140,6 +144,46 @@ class SimulationStats:
         year = int(math.floor(time))
         self.breakups_per_year[year] += 1
         self.total_breakups += 1
+
+    def record_solo_ended(self, duration: float) -> None:
+        """Registra la duración de un período de soltería que terminó al formarse pareja.
+
+        Se llama dos veces por cada pareja formada: una por cada miembro.
+
+        Args:
+            duration: Tiempo (años) que la persona estuvo soltera antes de emparejarse.
+        """
+        if duration >= 0.0:
+            self._solo_durations.append(duration)
+
+    # ------------------------------------------------------------------
+    # Propiedades derivadas sobre tiempo en soltería
+    # ------------------------------------------------------------------
+
+    @property
+    def avg_solo_time(self) -> float:
+        """Duración media (años) de los períodos de soltería hasta encontrar pareja."""
+        return sum(self._solo_durations) / len(self._solo_durations) if self._solo_durations else 0.0
+
+    @property
+    def median_solo_time(self) -> float:
+        """Mediana de las duraciones de soltería hasta encontrar pareja."""
+        if not self._solo_durations:
+            return 0.0
+        s = sorted(self._solo_durations)
+        n = len(s)
+        mid = n // 2
+        return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+    @property
+    def min_solo_time(self) -> float:
+        """Mínima duración de soltería registrada."""
+        return min(self._solo_durations) if self._solo_durations else 0.0
+
+    @property
+    def max_solo_time(self) -> float:
+        """Máxima duración de soltería registrada."""
+        return max(self._solo_durations) if self._solo_durations else 0.0
 
     def finalize(self, population: set) -> None:
         """Calcula métricas finales a partir de la población sobreviviente.
@@ -234,6 +278,13 @@ class SimulationStats:
             f"  Total fallecimientos   : {self.total_deaths}",
             f"  Parejas formadas       : {self.total_couples_formed}",
             f"  Rupturas ocurridas     : {self.total_breakups}",
+            "",
+            "  --- Tiempo en soltería (hasta formar pareja) ---",
+            f"  Observaciones          : {len(self._solo_durations)}",
+            f"  Media                  : {self.avg_solo_time:.2f} años",
+            f"  Mediana                : {self.median_solo_time:.2f} años",
+            f"  Mínimo                 : {self.min_solo_time:.2f} años",
+            f"  Máximo                 : {self.max_solo_time:.2f} años",
             "=" * 50,
         ]
         return "\n".join(lines)

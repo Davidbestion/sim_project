@@ -31,7 +31,7 @@ class EventType(Enum):
     BIRTH          = auto()   # Nacimiento de bebé(s) tras embarazo
     BREAKUP        = auto()   # Ruptura de una pareja
     SOLO_END       = auto()   # Fin del período de soledad post-ruptura/viudez
-    PARTNER_CHECK  = auto()   # Intento periódico de formación de parejas
+    SEEK_PARTNER   = auto()   # Una persona soltera busca pareja (Exp individual)
 
 
 @dataclass(order=True)
@@ -100,9 +100,10 @@ def handle_birthday(sim: Simulation, event: Event) -> None:
     """Procesa el cumpleaños anual de una persona.
 
     Incrementa su edad en un año y reprograma el próximo cumpleaños.
-    No re-programa la muerte: el tiempo de muerte ya fue calculado al
-    inicializar/nacer la persona usando el modelo tramo-a-tramo, que
-    contempla todos los tramos de edad futuros desde el inicio.
+    Además gestiona dos efectos colaterales:
+      - Si la persona cruza los 12 años, entra al pool de solteros.
+      - Si tras actualizar el deseo de pareja (tramo) el resultado es True
+        y no hay un SEEK_PARTNER pendiente, inicia la cadena de búsqueda.
 
     Args:
         sim: Instancia de la simulación.
@@ -113,9 +114,21 @@ def handle_birthday(sim: Simulation, event: Event) -> None:
     if not person.alive:
         return
 
-    person.birthday()  # +1 año
+    old_age = person.age
+    person.birthday()  # +1 año; actualiza partner_desire si cruza umbral de tramo
 
-    # Re-programar próximo cumpleaños si no supera el horizonte
+    # Si la persona acaba de cruzar los 12 años: incorporarla al pool de solteros
+    if old_age < 12.0 <= person.age:
+        person.solo_since = event.time
+        sim.singles.add(person)
+
+    # Si está soltera, desea pareja y no hay búsqueda activa: iniciar cadena.
+    # Cubre el primer cruce del umbral 12, cambios de deseo False→True en
+    # umbrales posteriores, y cualquier otro caso en que la cadena se detuvo.
+    if person.is_single and person.partner_desire and not person.seek_in_progress:
+        _schedule_seek_partner(sim, event.time, person)
+
+    # Re-programar próximo cumpleaños
     next_birthday = event.time + 1.0
     if next_birthday < sim.end_time:
         sim.schedule(Event(
@@ -207,8 +220,9 @@ def handle_birth(sim: Simulation, event: Event) -> None:
         return
 
     num_babies = sample_num_babies()
-    woman.register_birth(num_babies)  # actualiza conteo de hijos
 
+    # Registrar el parto (incluso si num_babies == 0: embarazo sin nacidos vivos)
+    woman.register_birth(num_babies)  # resetea pregnant y actualiza conteo
     sim.stats.record_birth(event.time, num_babies)
 
     for _ in range(num_babies):
@@ -315,95 +329,114 @@ def handle_solo_end(sim: Simulation, event: Event) -> None:
     # Sólo actuar si sigue en período de duelo (no fue recaptado antes)
     if person.is_grieving:
         person.end_grieving()
+        person.solo_since = event.time  # nuevo período de soltería comienza aquí
         sim.singles.add(person)
+        # Iniciar cadena de búsqueda de pareja si la persona lo desea
+        if person.partner_desire:
+            _schedule_seek_partner(sim, event.time, person)
 
 
-def handle_partner_check(sim: Simulation, event: Event) -> None:
-    """Procesa el intento periódico de formación de parejas entre solteros.
+def _schedule_seek_partner(
+    sim: Simulation, current_time: float, person: "Person"
+) -> None:
+    """Agenda el próximo evento SEEK_PARTNER para una persona soltera.
 
-    Itera sobre los solteros disponibles e intenta emparejarlos según las
-    reglas del problema: distinto sexo, ambos desean pareja, y probabilidad
-    según diferencia de edad. Reprograma el próximo chequeo.
+    Establece seek_in_progress=True para evitar duplicados en la cola.
+    No agenda nada si el tiempo resultante supera el horizonte.
 
     Args:
         sim: Instancia de la simulación.
-        event: Evento sin payload relevante.
+        current_time: Tiempo actual de simulación.
+        person: Persona soltera para la que se agenda la búsqueda.
     """
-    from distributions import wants_partner, will_form_couple
-    from distributions import time_to_pregnancy
-
-    # Separar solteros vivos por sexo que deseen pareja en este momento
-    available_men = [
-        p for p in sim.singles
-        if p.alive and p.is_male and p.is_single and wants_partner(p.age)
-    ]
-    available_women = [
-        p for p in sim.singles
-        if p.alive and p.is_female and p.is_single and wants_partner(p.age)
-    ]
-
-    # Mezclar aleatoriamente para evitar sesgos de orden
-    import random
-    random.shuffle(available_men)
-    random.shuffle(available_women)
-
-    paired_women: set = set()
-    paired_men: set = set()
-
-    for man in available_men:
-        if man.pid in paired_men:
-            continue
-        for woman in available_women:
-            if woman.pid in paired_women:
-                continue
-            # Intentar formar pareja
-            if will_form_couple(man.age, woman.age):
-                man.form_couple(woman)
-                sim.singles.discard(man)
-                sim.singles.discard(woman)
-                paired_men.add(man.pid)
-                paired_women.add(woman.pid)
-
-                sim.stats.record_couple_formed(event.time)
-
-                # Paso 1: calcular cuándo se separarán (Geométrica, un solo sorteo).
-                from distributions import time_to_breakup
-                dt_breakup = time_to_breakup()
-                t_breakup_abs = event.time + dt_breakup
-
-                # Guardar el tiempo absoluto de ruptura en ambos miembros.
-                # Esto permite que handle_pregnancy decida sin verificar is_in_couple.
-                man.couple_breakup_time = t_breakup_abs
-                woman.couple_breakup_time = t_breakup_abs
-
-                sim.schedule(Event(
-                    time=t_breakup_abs,
-                    event_type=EventType.BREAKUP,
-                    payload={"person": man}
-                ))
-
-                # Paso 2: calcular el primer intento de embarazo.
-                # Solo se agenda si ocurre ANTES de la ruptura prevista,
-                # garantizando que cuando llegue el evento la mujer tiene pareja.
-                dt_preg = time_to_pregnancy(woman.age)
-                t_preg = event.time + dt_preg
-                if t_preg < t_breakup_abs:
-                    sim.schedule(Event(
-                        time=t_preg,
-                        event_type=EventType.PREGNANCY,
-                        payload={"woman": woman}
-                    ))
-
-                break  # el hombre ya tiene pareja; pasar al siguiente
-
-    # Reprogramar el próximo chequeo de parejas (cada 6 meses)
-    next_check = event.time + 0.5
-    if next_check < sim.end_time:
+    from distributions import time_to_seek_partner
+    t_next = current_time + time_to_seek_partner()
+    if t_next < sim.end_time:
+        person.seek_in_progress = True
         sim.schedule(Event(
-            time=next_check,
-            event_type=EventType.PARTNER_CHECK,
-            payload={}
+            time=t_next,
+            event_type=EventType.SEEK_PARTNER,
+            payload={"person": person}
         ))
+
+
+def handle_seek_partner(sim: Simulation, event: Event) -> None:
+    """Procesa el intento de una persona soltera de encontrar pareja.
+
+    Cada persona soltera que desea pareja agenda de forma autónoma sus propios
+    eventos SEEK_PARTNER con tiempos sorteados de Exp(MEAN_SEEK_INTERVAL).
+    Cuando el evento ocurre:
+      - Se elige un candidato aleatorio del sexo opuesto que también desea pareja.
+      - Se llama a will_form_couple(ages) para decidir si forman pareja.
+      - Si forman pareja: se ejecuta la unión, se agenda BREAKUP y primer PREGNANCY.
+      - Si no hay candidatos o el intento falla: se reagenda el próximo encuentro.
+
+    Este modelo reemplaza el checkeo global periódico (PARTNER_CHECK) por un
+    proceso continuo individual, eliminando la discretización temporal.
+
+    Args:
+        sim: Instancia de la simulación.
+        event: Evento con payload {'person': Person}.
+    """
+    import random
+    from distributions import will_form_couple, time_to_breakup, time_to_pregnancy
+
+    person = event.payload["person"]
+    person.seek_in_progress = False  # el evento se está procesando; resetear flag
+
+    # Cancelar si la persona murió, ya no es soltera, o perdió el deseo de pareja
+    if not person.alive or not person.is_single or not person.partner_desire:
+        return  # no reagendar → cadena se detiene naturalmente
+
+    # Candidatos: solteros vivos del sexo opuesto que también desean pareja
+    candidates = [
+        p for p in sim.singles
+        if p.alive and p.is_single and p.partner_desire and p.is_male != person.is_male
+    ]
+
+    if not candidates:
+        # Sin candidatos disponibles; reagendar e intentar más tarde
+        _schedule_seek_partner(sim, event.time, person)
+        return
+
+    candidate = random.choice(candidates)
+    man = person if person.is_male else candidate
+    woman = candidate if person.is_male else person
+
+    if will_form_couple(man.age, woman.age):
+        # Registrar duración del período de soltería de ambos antes de unirlos
+        sim.stats.record_solo_ended(event.time - man.solo_since)
+        sim.stats.record_solo_ended(event.time - woman.solo_since)
+
+        man.form_couple(woman)
+        sim.singles.discard(man)
+        sim.singles.discard(woman)
+        sim.stats.record_couple_formed(event.time)
+
+        # Sortear tiempo de ruptura (un único sorteo al formarse la pareja)
+        dt_breakup = time_to_breakup()
+        t_breakup_abs = event.time + dt_breakup
+        man.couple_breakup_time = t_breakup_abs
+        woman.couple_breakup_time = t_breakup_abs
+
+        sim.schedule(Event(
+            time=t_breakup_abs,
+            event_type=EventType.BREAKUP,
+            payload={"person": man}
+        ))
+
+        # Primer intento de embarazo, solo si ocurre antes de la ruptura prevista
+        dt_preg = time_to_pregnancy(woman.age)
+        t_preg = event.time + dt_preg
+        if t_preg < t_breakup_abs:
+            sim.schedule(Event(
+                time=t_preg,
+                event_type=EventType.PREGNANCY,
+                payload={"woman": woman}
+            ))
+    else:
+        # Intento fallido; reagendar próximo encuentro para esta persona
+        _schedule_seek_partner(sim, event.time, person)
 
 
 # ---------------------------------------------------------------------------
@@ -417,5 +450,5 @@ EVENT_HANDLERS = {
     EventType.BIRTH:         handle_birth,
     EventType.BREAKUP:       handle_breakup,
     EventType.SOLO_END:      handle_solo_end,
-    EventType.PARTNER_CHECK: handle_partner_check,
+    EventType.SEEK_PARTNER:  handle_seek_partner,
 }
