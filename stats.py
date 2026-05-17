@@ -233,6 +233,30 @@ class SimulationStats:
             sizes.append(size)
         return times, sizes
 
+    def yearly_population(self) -> list[int]:
+        """Devuelve el tamaño poblacional al final de cada año entero.
+
+        Muestrea la población en los instantes t = 0, 1, 2, …, floor(end_time).
+        Útil para comparar trayectorias entre réplicas en estudios batch.
+
+        Returns:
+            Lista de longitud floor(end_time)+1 donde el índice es el año y
+            el valor es la población acumulada hasta ese instante.
+        """
+        events = sorted(self._pop_events, key=lambda x: x[0])
+        max_year = int(math.floor(self.end_time))
+        result: list[int] = []
+        size = 0
+        ei = 0
+        n = len(events)
+        for year in range(max_year + 1):
+            # Avanzar todos los eventos ocurridos hasta (inclusive) este año
+            while ei < n and events[ei][0] <= float(year):
+                size += events[ei][1]
+                ei += 1
+            result.append(size)
+        return result
+
     def _annual_series(self, data: dict[int, int]) -> tuple[list[int], list[int]]:
         """Convierte un dict {año: conteo} en listas ordenadas para graficar.
 

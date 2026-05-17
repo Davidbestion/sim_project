@@ -169,12 +169,16 @@ def handle_pregnancy(sim: Simulation, event: Event) -> None:
     if not woman.alive:
         return
 
-    # Cancelar si ya está embarazada o ninguno de los dos quiere más hijos
+    # Cancelar si ya está embarazada
     if woman.pregnant:
         return
-    if not woman.wants_more_children and (
-        woman.partner is None or not woman.partner.wants_more_children
-    ):
+    # Cancelar si ya no tiene pareja (puede haber muerto antes de este evento)
+    if not woman.is_in_couple or woman.partner is None:
+        return
+    # Cancelar si ya han llegado al mínimo de los dos deseos: en cuanto uno
+    # de los dos queda satisfecho, la pareja deja de intentar tener más hijos.
+    min_desired = min(woman.children_desired, woman.partner.children_desired)
+    if woman.children_had >= min_desired:
         return
 
     # Sortear si queda embarazada en este intento

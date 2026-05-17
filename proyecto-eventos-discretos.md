@@ -21,7 +21,7 @@ El informe de trabajo debe contener los siguientes elementos:
 6. El enlace al repositorio del proyecto en Github
 
 # Problema escogido: Poblado en Evolución
-Se dese conocer la evolución de la población de una determinada región.
+Se desea conocer la evolución de la población de una determinada región.
 Se conoce que la probabilidad de fallecer de una persona distribuye uniforme y se corresponde, según su edad y sexo, con la siguiente tabla:
 
    | Edad    |  Hombre   |  Mujer
@@ -31,7 +31,7 @@ Se conoce que la probabilidad de fallecer de una persona distribuye uniforme y s
    | 45-76   | 0.3       | 0.35
    | 76-125  | 0.7       | 0.65 
 
-Del mismo modo, se conoce que la probabilidad de una mujer se embarace es uniforme y está relacionada con la edad:
+Del mismo modo, se conoce que la probabilidad de que una mujer se embarace es uniforme y está relacionada con la edad:
 
    | Edad    | Probabilidad Embarazarce
    |---------|----------------------

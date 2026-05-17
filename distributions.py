@@ -246,7 +246,7 @@ PARTNER_WISH_THRESHOLDS: list[int] = [row[0] for row in _PARTNER_WISH_TABLE]
 # Tiempo medio (años) entre encuentros de un soltero con un posible candidato/a.
 # Parámetro de la Exponencial usada en el evento SEEK_PARTNER de cada persona.
 # Cambiar este valor para calibrar la frecuencia de búsqueda de pareja.
-MEAN_SEEK_INTERVAL: float = 0.50   # ≈ 3 meses de media entre encuentros
+MEAN_SEEK_INTERVAL: float = 0.50   # ≈ 6 meses 
 
 
 def time_to_seek_partner() -> float:

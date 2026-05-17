@@ -131,15 +131,18 @@ class Person:
         """True si la mujer cumple las condiciones básicas para quedar embarazada.
 
         Condiciones: estar viva, ser mujer, tener pareja, no estar ya
-        embarazada y querer más hijos (ella o su pareja también quiere).
+        embarazada, y no haber superado el mínimo de hijos deseado entre
+        ella y su pareja (en cuanto uno de los dos queda satisfecho, paran).
         """
         if not self.alive or self.is_male or not self.is_in_couple:
             return False
-        if self.pregnant:
+        if self.pregnant or self.partner is None:
             return False
-        # Tanto ella como su pareja deben querer más hijos
-        partner_wants = self.partner is not None and self.partner.wants_more_children
-        return self.wants_more_children or partner_wants
+        # El umbral de hijos es el MENOR entre lo que desea ella y lo que
+        # desea su pareja: en cuanto uno de los dos queda satisfecho, la
+        # pareja deja de intentar tener más hijos.
+        min_desired = min(self.children_desired, self.partner.children_desired)
+        return self.children_had < min_desired
 
     # ------------------------------------------------------------------
     # Métodos de cambio de estado
